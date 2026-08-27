@@ -11,13 +11,18 @@ data "terraform_remote_state" "platform" {
 }
 
 locals {
+  location = coalesce(
+    try(data.terraform_remote_state.platform[0].outputs.secondary_region, null),
+    var.location
+  )
+
   resource_group_name = coalesce(
     var.resource_group_name,
     try(data.terraform_remote_state.platform[0].outputs.resource_group_name, null)
   )
   services_subnet_id = coalesce(
-    var.services_subnet_id,
-    try(data.terraform_remote_state.platform[0].outputs.services_subnet_id, null)
+    try(data.terraform_remote_state.platform[0].outputs.secondary_services_subnet_id, null),
+    var.services_subnet_id
   )
 
   security_rules = merge(
@@ -51,7 +56,7 @@ module "nsg" {
 
   name                = var.nsg_name
   resource_group_name = local.resource_group_name
-  location            = var.location
+  location            = local.location
   security_rules      = local.security_rules
   tags                = var.tags
 }
@@ -62,7 +67,7 @@ module "public_ip" {
 
   name                = var.public_ip_name
   resource_group_name = local.resource_group_name
-  location            = var.location
+  location            = local.location
   tags                = var.tags
 }
 
@@ -71,7 +76,7 @@ module "nic" {
 
   name                      = var.nic_name
   resource_group_name       = local.resource_group_name
-  location                  = var.location
+  location                  = local.location
   subnet_id                 = local.services_subnet_id
   network_security_group_id = module.nsg.id
   public_ip_id              = try(module.public_ip[0].id, null)
@@ -83,8 +88,9 @@ module "vm" {
 
   name                 = var.vm_name
   resource_group_name  = local.resource_group_name
-  location             = var.location
+  location             = local.location
   size                 = var.vm_size
+  source_image_sku     = var.source_image_sku
   admin_username       = var.admin_username
   ssh_public_key       = var.ssh_public_key
   network_interface_id = module.nic.id
