@@ -68,6 +68,7 @@ module "public_ip" {
   name                = var.public_ip_name
   resource_group_name = local.resource_group_name
   location            = local.location
+  domain_name_label   = var.public_ip_domain_name_label
   tags                = var.tags
 }
 
