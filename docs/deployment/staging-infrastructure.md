@@ -15,9 +15,23 @@
 
 Password authentication is disabled. The NSG has no custom inbound rules; no SSH, public application, MySQL, or Kafka access is exposed. Azure default deny-inbound remains effective. Cross-region peering and the MySQL private-DNS link support future private connectivity to Kafka and MySQL.
 
-## Application Status
+## Deployment Verification
 
-The Reporting read model, reports API, Docker runtime, and Kafka event consumers are **not deployed**. The VM is currently deallocated for staging cost control.
+| Check | Result |
+|---|---|
+| Application source SHA | `efc229f6034c4719d6eec47a14a9f281b08ed5e7` (developer CI manually verified PASS) |
+| DevOps branch / commit | `ASSMS-4-us-04-staging-deployment` / `6bdcf08` |
+| Image | `assms-reporting-service:efc229f6034c4719d6eec47a14a9f281b08ed5e7` (`linux/arm64`) |
+| Database migration | `database/migrations/V01__create_job_projection.sql` — PASS |
+| Runtime | Docker container `assms-reporting-service`, loopback-only `127.0.0.1:8080` |
+| HTTPS endpoint | `https://assms-reporting-staging-45ff260826.centralindia.cloudapp.azure.com` |
+| Health / DB health | `GET /api/health` 200; `GET /api/health/db` 200 |
+
+Manual API verification passed for `GET /api/reports/jobs-by-status`. The unfiltered report returned the expected response schema; the supported `from`/`to` date filter succeeded; and a historic no-data range returned 200 with an empty `statuses` array and `total: 0`.
+
+`REPORT_GROUPED_DATA_VERIFICATION_DEFERRED_WITH_KAFKA`: no legitimate event-fed projection data was present and Kafka remains deferred. No projection rows were manually inserted.
+
+`KAFKA_SPRINT1_DEFERRED`: the Kafka VM remains deallocated and consumer/event processing was not claimed as verified. Nginx terminates HTTPS and proxies only to loopback. TCP 8080, MySQL, Kafka, and SSH are not publicly exposed; no secrets are stored in this document.
 
 ## ARM64 Note
 
