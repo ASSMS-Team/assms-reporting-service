@@ -1,0 +1,67 @@
+@ReportingService_HostAddress = http://localhost:5238
+
+### Jobs by status - unfiltered
+# Every projected job. With no bounds the WHERE clause is omitted entirely,
+# rather than filled with a range wide enough to match everything.
+GET {{ReportingService_HostAddress}}/api/reports/jobs-by-status
+Accept: application/json
+
+### Jobs by status - bounded at both ends
+# Inclusive, so a job created exactly at either instant is counted. The bounds
+# apply to when the job was created in the Job Service, not to when this service
+# absorbed the event.
+GET {{ReportingService_HostAddress}}/api/reports/jobs-by-status?from=2026-08-01&to=2026-08-31
+Accept: application/json
+
+### Jobs by status - lower bound only
+# Everything raised since this date. The two bounds are independent.
+GET {{ReportingService_HostAddress}}/api/reports/jobs-by-status?from=2026-08-01
+Accept: application/json
+
+### Jobs by status - upper bound only
+# Everything raised up to this date.
+GET {{ReportingService_HostAddress}}/api/reports/jobs-by-status?to=2026-08-31
+Accept: application/json
+
+### Jobs by status - bound carrying a UTC offset
+# A date with no time is read as midnight UTC; a value carrying an offset is
+# converted rather than compared as written, so 09:00 in Sri Lanka is 03:30 UTC.
+# The + is percent-encoded because a bare + in a query string means a space.
+GET {{ReportingService_HostAddress}}/api/reports/jobs-by-status?from=2026-08-01T09:00:00%2B05:30
+Accept: application/json
+
+### Jobs by status - single-instant range
+# Allowed: the bounds are inclusive at both ends, so from equal to to is a
+# legitimate request rather than a backwards one.
+GET {{ReportingService_HostAddress}}/api/reports/jobs-by-status?from=2026-08-01&to=2026-08-01
+Accept: application/json
+
+### Jobs by status - blank bounds
+# ?from= is a caller who cleared the field, not a broken date. 200, unfiltered.
+GET {{ReportingService_HostAddress}}/api/reports/jobs-by-status?from=&to=
+Accept: application/json
+
+### Jobs by status - a range nothing falls into
+# Expect 200 with an empty array and a total of 0, not a 404. The report ran and
+# the answer was none.
+GET {{ReportingService_HostAddress}}/api/reports/jobs-by-status?from=1990-01-01&to=1990-12-31
+Accept: application/json
+
+### Jobs by status - unparseable from
+# Expect 400, with the error keyed on "from".
+GET {{ReportingService_HostAddress}}/api/reports/jobs-by-status?from=not-a-date
+Accept: application/json
+
+### Jobs by status - both bounds unparseable
+# Expect 400 naming both fields. They are parsed before either is judged, so one
+# bad value does not hide the other.
+GET {{ReportingService_HostAddress}}/api/reports/jobs-by-status?from=yesterday&to=soon
+Accept: application/json
+
+### Jobs by status - from after to
+# Expect 400 keyed on "from" alone: the backwards range is one fact, and
+# reporting it against both fields would look like two separate problems.
+GET {{ReportingService_HostAddress}}/api/reports/jobs-by-status?from=2026-08-31&to=2026-08-01
+Accept: application/json
+
+###

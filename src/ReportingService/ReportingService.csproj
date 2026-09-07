@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- CS1591: missing XML comment on a public member. Only the API surface
+         that Swagger renders is documented, so this would otherwise fire on
+         every other public type in the project. -->
+    <NoWarn>$(NoWarn);1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The consume loop's failure handling is the part of this service most
+         worth testing and the part hardest to reach: it decides whether to
+         commit past a message or seek back to it, and that decision is not
+         visible from any public surface. The test project is given the internal
+         seams that make it reachable - a consumer factory and the deserializer -
+         rather than the loop being left unverified. -->
+    <InternalsVisibleTo Include="ReportingService.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Confluent.Kafka" Version="2.15.0" />
+    <PackageReference Include="MySqlConnector" Version="2.6.2" />
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.6.2" />
+  </ItemGroup>
+
+</Project>

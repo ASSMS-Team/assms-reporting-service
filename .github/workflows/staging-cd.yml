@@ -1,0 +1,73 @@
+name: Reporting Service Staging CD
+
+on:
+  workflow_call:
+    inputs:
+      commit_sha:
+        required: true
+        type: string
+    secrets:
+      REPORTING_DEPLOY_SSH_PRIVATE_KEY:
+        required: true
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: reporting-service-staging-deployment
+  cancel-in-progress: false
+
+jobs:
+  deploy-staging:
+    if: github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+      REPORTING_API_URL: ${{ vars.REPORTING_API_URL }}
+      REPORTING_NSG_NAME: ${{ vars.REPORTING_NSG_NAME }}
+      REPORTING_TEMP_SSH_RULE_PRIORITY: ${{ vars.REPORTING_TEMP_SSH_RULE_PRIORITY }}
+      REPORTING_VM_HOST: ${{ vars.REPORTING_VM_HOST }}
+      REPORTING_VM_SSH_USERNAME: ${{ vars.REPORTING_VM_SSH_USERNAME }}
+      DEPLOY_SHA: ${{ inputs.commit_sha }}
+      IMAGE_NAME: assms-reporting-service
+      TEMP_SSH_RULE_NAME: gh-cd-reporting-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.commit_sha }}
+      - uses: docker/setup-buildx-action@v3
+      - name: Build exact ARM64 image
+        run: |
+          docker buildx build --platform linux/arm64 --load --tag "${IMAGE_NAME}:${DEPLOY_SHA}" .
+          test "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "${IMAGE_NAME}:${DEPLOY_SHA}")" = "linux/arm64"
+          docker save "${IMAGE_NAME}:${DEPLOY_SHA}" | gzip -c > reporting-image.tar.gz
+      - uses: azure/login@v2
+        id: azure_login
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Prepare deployment SSH key
+        run: |
+          umask 077; mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.REPORTING_DEPLOY_SSH_PRIVATE_KEY }}" > ~/.ssh/reporting_deploy_ed25519
+          printf '%s\n' "${{ vars.REPORTING_VM_SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/reporting_deploy_ed25519 ~/.ssh/known_hosts
+      - name: Allow temporary SSH from this runner only
+        run: |
+          runner_ip="$(curl --fail --silent --show-error --retry 3 https://api.ipify.org)"
+          az network nsg rule create --resource-group "$AZURE_RESOURCE_GROUP" --nsg-name "$REPORTING_NSG_NAME" --name "$TEMP_SSH_RULE_NAME" --priority "$REPORTING_TEMP_SSH_RULE_PRIORITY" --direction Inbound --access Allow --protocol Tcp --source-address-prefixes "${runner_ip}/32" --source-port-ranges '*' --destination-address-prefixes '*' --destination-port-ranges 22
+      - name: Transfer image and replace Reporting container
+        run: |
+          scp -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -i ~/.ssh/reporting_deploy_ed25519 reporting-image.tar.gz "${REPORTING_VM_SSH_USERNAME}@${REPORTING_VM_HOST}:/tmp/reporting-image-${DEPLOY_SHA}.tar.gz"
+          ssh -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -i ~/.ssh/reporting_deploy_ed25519 "${REPORTING_VM_SSH_USERNAME}@${REPORTING_VM_HOST}" "sudo docker load -i /tmp/reporting-image-${DEPLOY_SHA}.tar.gz && sudo rm -f /tmp/reporting-image-${DEPLOY_SHA}.tar.gz && (sudo docker rm -f assms-reporting-service || true) && sudo docker run -d --name assms-reporting-service --restart unless-stopped --env-file /etc/assms/reporting.env -p 127.0.0.1:8080:8080 ${IMAGE_NAME}:${DEPLOY_SHA} && sudo systemctl is-active --quiet nginx"
+      - name: Verify public HTTPS health
+        run: |
+          for path in /api/health /api/health/db; do
+            test "$(curl --fail --silent --show-error --retry 12 --retry-delay 5 --output /dev/null --write-out '%{http_code}' "${REPORTING_API_URL}${path}")" = "200"
+          done
+      - name: Remove temporary SSH rule
+        if: always() && steps.azure_login.outcome == 'success'
+        run: az network nsg rule delete --resource-group "$AZURE_RESOURCE_GROUP" --nsg-name "$REPORTING_NSG_NAME" --name "$TEMP_SSH_RULE_NAME" || true
