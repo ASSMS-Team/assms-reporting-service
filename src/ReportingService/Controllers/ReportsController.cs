@@ -97,6 +97,30 @@ public class ReportsController : ControllerBase
         });
     }
 
+    /// <summary>Groups projected jobs by their assigned technician.</summary>
+    [HttpGet("jobs-by-technician")]
+    [ProducesResponseType(typeof(JobsByTechnicianResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ValidationProblemDetails), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> GetJobsByTechnician([FromQuery] string? from, [FromQuery] string? to)
+    {
+        if (!TryParseBound(from, out var fromUtc) || !TryParseBound(to, out var toUtc))
+            return BadRequest(new ValidationProblemDetails(new Dictionary<string, string[]> { ["date"] = new[] { InvalidDateMessage } }) { Status = 400 });
+        if (fromUtc.HasValue && toUtc.HasValue && fromUtc > toUtc)
+            return BadRequest(new ValidationProblemDetails(new Dictionary<string, string[]> { ["from"] = new[] { "from must not be after to." } }) { Status = 400 });
+
+        var counts = await _repository.GetTechnicianJobCountsAsync(fromUtc, toUtc);
+        return Ok(new JobsByTechnicianResponse
+        {
+            Technicians = counts.Select(count => new TechnicianJobCountResponse
+            {
+                TechnicianId = count.TechnicianId,
+                TechnicianReference = count.TechnicianReference,
+                JobCount = count.JobCount,
+            }).ToList(),
+            Total = counts.Sum(count => count.JobCount),
+        });
+    }
+
     // Absent and blank are the same thing: ?from= is a caller who cleared the
     // field, not a caller who sent a broken date.
     //

@@ -57,6 +57,30 @@ public class JobProjectionRepository : IJobProjectionRepository
         await command.ExecuteNonQueryAsync();
     }
 
+    public async Task ApplyAssignmentAsync(JobAssignmentProjection assignment)
+    {
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync();
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = @"
+            INSERT INTO job_assignment_projection
+                (job_id, technician_id, technician_reference, assigned_at)
+            VALUES
+                (@jobId, @technicianId, @technicianReference, @assignedAt)
+            AS incoming
+            ON DUPLICATE KEY UPDATE
+                technician_id = incoming.technician_id,
+                technician_reference = incoming.technician_reference,
+                assigned_at = incoming.assigned_at;";
+        command.Parameters.AddWithValue("@jobId", assignment.JobId);
+        command.Parameters.AddWithValue("@technicianId", assignment.TechnicianId);
+        command.Parameters.AddWithValue("@technicianReference", assignment.TechnicianReference);
+        command.Parameters.AddWithValue("@assignedAt", assignment.AssignedAt.ToUniversalTime());
+
+        await command.ExecuteNonQueryAsync();
+    }
+
     public async Task<IReadOnlyList<JobStatusCount>> GetStatusCountsAsync(DateTime? from, DateTime? to)
     {
         await using var connection = _connectionFactory.CreateConnection();
@@ -111,6 +135,47 @@ public class JobProjectionRepository : IJobProjectionRepository
                 // COUNT(*) comes back as a BIGINT. The narrowing is safe for
                 // any job volume this system will hold.
                 Count = (int)reader.GetInt64(countOrdinal)
+            });
+        }
+
+        return counts;
+    }
+
+    public async Task<IReadOnlyList<TechnicianJobCount>> GetTechnicianJobCountsAsync(DateTime? from, DateTime? to)
+    {
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+
+        var conditions = new List<string>();
+        if (from.HasValue)
+        {
+            conditions.Add("j.job_created_at >= @from");
+            command.Parameters.AddWithValue("@from", from.Value);
+        }
+        if (to.HasValue)
+        {
+            conditions.Add("j.job_created_at <= @to");
+            command.Parameters.AddWithValue("@to", to.Value);
+        }
+
+        command.CommandText = @"
+            SELECT a.technician_id, a.technician_reference, COUNT(*) AS job_count
+            FROM job_projection j
+            JOIN job_assignment_projection a ON a.job_id = j.job_id" +
+            (conditions.Count == 0 ? string.Empty : "\n            WHERE " + string.Join(" AND ", conditions)) + @"
+            GROUP BY a.technician_id, a.technician_reference
+            ORDER BY a.technician_reference;";
+
+        var counts = new List<TechnicianJobCount>();
+        await using var reader = (MySqlDataReader)await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            counts.Add(new TechnicianJobCount
+            {
+                TechnicianId = Convert.ToString(reader.GetValue(0))!,
+                TechnicianReference = reader.GetString(1),
+                JobCount = (int)reader.GetInt64(2),
             });
         }
 

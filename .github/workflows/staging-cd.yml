@@ -62,7 +62,7 @@ jobs:
       - name: Transfer image and replace Reporting container
         run: |
           scp -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -i ~/.ssh/reporting_deploy_ed25519 reporting-image.tar.gz "${REPORTING_VM_SSH_USERNAME}@${REPORTING_VM_HOST}:/tmp/reporting-image-${DEPLOY_SHA}.tar.gz"
-          ssh -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -i ~/.ssh/reporting_deploy_ed25519 "${REPORTING_VM_SSH_USERNAME}@${REPORTING_VM_HOST}" "sudo docker load -i /tmp/reporting-image-${DEPLOY_SHA}.tar.gz && sudo rm -f /tmp/reporting-image-${DEPLOY_SHA}.tar.gz && (sudo docker rm -f assms-reporting-service || true) && sudo docker run -d --name assms-reporting-service --restart unless-stopped --env-file /etc/assms/reporting.env -p 127.0.0.1:8080:8080 ${IMAGE_NAME}:${DEPLOY_SHA} && sudo systemctl is-active --quiet nginx"
+          ssh -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -i ~/.ssh/reporting_deploy_ed25519 "${REPORTING_VM_SSH_USERNAME}@${REPORTING_VM_HOST}" "sudo docker load -i /tmp/reporting-image-${DEPLOY_SHA}.tar.gz && sudo rm -f /tmp/reporting-image-${DEPLOY_SHA}.tar.gz && sudo docker run --rm --env-file /etc/assms/reporting.env ${IMAGE_NAME}:${DEPLOY_SHA} --apply-migrations && (sudo docker rm -f assms-reporting-service || true) && sudo docker run -d --name assms-reporting-service --restart unless-stopped --env-file /etc/assms/reporting.env -p 127.0.0.1:8080:8080 ${IMAGE_NAME}:${DEPLOY_SHA} && sudo systemctl is-active --quiet nginx"
       - name: Verify public HTTPS health
         run: |
           for path in /api/health /api/health/db; do

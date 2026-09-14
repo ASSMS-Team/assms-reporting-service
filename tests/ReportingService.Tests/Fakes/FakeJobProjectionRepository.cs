@@ -13,6 +13,7 @@ public class FakeJobProjectionRepository : IJobProjectionRepository
     // have reached the table.
     public readonly List<JobProjection> Upserted = new();
     public int UpsertAsyncCallCount;
+    public readonly List<JobAssignmentProjection> Assignments = new();
 
     // Left null for the happy path. Set it to stand in for the database being
     // unreachable, which is the failure the consumer must retry rather than
@@ -69,4 +70,14 @@ public class FakeJobProjectionRepository : IJobProjectionRepository
 
         return Task.FromResult(CountsToReturn);
     }
+
+    public Task ApplyAssignmentAsync(JobAssignmentProjection assignment)
+    {
+        Assignments.Add(assignment);
+        return Task.CompletedTask;
+    }
+
+    public IReadOnlyList<TechnicianJobCount> TechnicianCountsToReturn = Array.Empty<TechnicianJobCount>();
+    public Task<IReadOnlyList<TechnicianJobCount>> GetTechnicianJobCountsAsync(DateTime? from, DateTime? to) =>
+        Task.FromResult(TechnicianCountsToReturn);
 }

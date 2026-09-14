@@ -12,6 +12,9 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Content Include="..\..\database\migrations\*.sql"
+             Link="migrations\%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest" />
     <!-- The consume loop's failure handling is the part of this service most
          worth testing and the part hardest to reach: it decides whether to
          commit past a message or seek back to it, and that decision is not
