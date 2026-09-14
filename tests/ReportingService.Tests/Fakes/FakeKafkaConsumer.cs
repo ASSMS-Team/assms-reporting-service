@@ -12,7 +12,16 @@ namespace ReportingService.Tests;
 // on one should fail loudly here instead of quietly passing against a stub.
 public class FakeKafkaConsumer : IConsumer<string, string>
 {
-    public const string Topic = "job-created";
+    // Which topic the queued messages claim to come from. This service runs two
+    // consume loops on two different topics, so the fake cannot hard-code one:
+    // the offsets a test asserts on carry the topic name, and a job-assigned
+    // message labelled job-created would make a passing assertion meaningless.
+    //
+    // Defaulted to job-created so the JobCreated tests, written before there was
+    // a second loop, construct it exactly as they did.
+    public string Topic { get; }
+
+    public FakeKafkaConsumer(string topic = "job-created") => Topic = topic;
 
     private readonly Queue<ConsumeResult<string, string>> _messages = new();
 

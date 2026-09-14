@@ -12,13 +12,29 @@ public sealed class JobAssignedConsumer : BackgroundService
     private static readonly TimeSpan RetryDelay = TimeSpan.FromSeconds(5);
     private static readonly JsonSerializerOptions SerializerOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
     private readonly ConsumerConfig _config;
+    private readonly Func<ConsumerConfig, IConsumer<string, string>> _consumerFactory;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<JobAssignedConsumer> _logger;
 
     public JobAssignedConsumer(string bootstrapServers, IServiceScopeFactory scopeFactory, ILogger<JobAssignedConsumer> logger)
+        : this(bootstrapServers, scopeFactory, logger, config => new ConsumerBuilder<string, string>(config).Build())
+    {
+    }
+
+    // The factory exists so a test can hand the loop a consumer it controls.
+    // Building one inside ExecuteAsync would tie the whole of this class to a
+    // running broker, and the branch worth testing - commit past the message or
+    // seek back to it - is exactly the branch that would then be unreachable.
+    // JobCreatedConsumer exposes the same seam for the same reason.
+    internal JobAssignedConsumer(
+        string bootstrapServers,
+        IServiceScopeFactory scopeFactory,
+        ILogger<JobAssignedConsumer> logger,
+        Func<ConsumerConfig, IConsumer<string, string>> consumerFactory)
     {
         _scopeFactory = scopeFactory;
         _logger = logger;
+        _consumerFactory = consumerFactory;
         _config = new ConsumerConfig
         {
             BootstrapServers = bootstrapServers,
@@ -31,7 +47,7 @@ public sealed class JobAssignedConsumer : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         await Task.Yield();
-        using var consumer = new ConsumerBuilder<string, string>(_config).Build();
+        using var consumer = _consumerFactory(_config);
         consumer.Subscribe(JobAssignedPayload.Topic);
         _logger.LogInformation("Subscribed to {Topic} as group {GroupId}.", JobAssignedPayload.Topic, JobAssignedPayload.ConsumerGroup);
 
@@ -48,7 +64,7 @@ public sealed class JobAssignedConsumer : BackgroundService
                 }
 
                 EventEnvelope<JobAssignedPayload>? envelope;
-                try { envelope = JsonSerializer.Deserialize<EventEnvelope<JobAssignedPayload>>(message.Message.Value, SerializerOptions); }
+                try { envelope = Deserialize(message.Message.Value); }
                 catch (JsonException ex)
                 {
                     _logger.LogError(ex, "Discarding malformed JobAssigned event at {Offset}.", message.TopicPartitionOffset);
@@ -91,4 +107,10 @@ public sealed class JobAssignedConsumer : BackgroundService
         }
         finally { consumer.Close(); }
     }
+
+    // Internal rather than private so the contract tests can pin the mapping from
+    // a real published message onto the types this service redefined - the drift
+    // those redefinitions risk is the whole reason to test them.
+    internal static EventEnvelope<JobAssignedPayload>? Deserialize(string value) =>
+        JsonSerializer.Deserialize<EventEnvelope<JobAssignedPayload>>(value, SerializerOptions);
 }
