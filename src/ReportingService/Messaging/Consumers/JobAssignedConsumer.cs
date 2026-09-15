@@ -72,13 +72,14 @@ public sealed class JobAssignedConsumer : BackgroundService
                     continue;
                 }
 
-                if (envelope?.Payload is null || string.IsNullOrWhiteSpace(envelope.Payload.JobId) ||
-                    string.IsNullOrWhiteSpace(envelope.Payload.TechnicianId) || string.IsNullOrWhiteSpace(envelope.Payload.TechnicianReference))
+                if (!IsUsable(envelope, message.Message.Key))
                 {
                     _logger.LogError("Discarding invalid JobAssigned event at {Offset}.", message.TopicPartitionOffset);
                     consumer.Commit(message);
                     continue;
                 }
+
+                var payload = envelope!.Payload;
 
                 try
                 {
@@ -86,10 +87,10 @@ public sealed class JobAssignedConsumer : BackgroundService
                     var repository = scope.ServiceProvider.GetRequiredService<IJobProjectionRepository>();
                     await repository.ApplyAssignmentAsync(new JobAssignmentProjection
                     {
-                        JobId = envelope.Payload.JobId,
-                        TechnicianId = envelope.Payload.TechnicianId,
-                        TechnicianReference = envelope.Payload.TechnicianReference,
-                        AssignedAt = envelope.Payload.AssignedAt,
+                        JobId = payload.JobId,
+                        TechnicianId = payload.TechnicianId,
+                        TechnicianReference = payload.TechnicianReference,
+                        AssignedAt = payload.AssignedAt,
                     });
                     consumer.Commit(message);
                 }
@@ -113,4 +114,20 @@ public sealed class JobAssignedConsumer : BackgroundService
     // those redefinitions risk is the whole reason to test them.
     internal static EventEnvelope<JobAssignedPayload>? Deserialize(string value) =>
         JsonSerializer.Deserialize<EventEnvelope<JobAssignedPayload>>(value, SerializerOptions);
+
+    internal static bool IsUsable(EventEnvelope<JobAssignedPayload>? envelope, string? messageKey) =>
+        envelope?.Payload is not null
+        && Guid.TryParse(envelope.EventId, out _)
+        && string.Equals(envelope.EventType, JobAssignedPayload.EventType, StringComparison.Ordinal)
+        && envelope.EventVersion == JobAssignedPayload.EventVersion
+        && string.Equals(envelope.Producer, JobAssignedPayload.Producer, StringComparison.Ordinal)
+        && envelope.OccurredAt != default
+        && envelope.OccurredAt.Kind == DateTimeKind.Utc
+        && Guid.TryParse(envelope.Payload.JobId, out _)
+        && Guid.TryParse(envelope.Payload.AssignmentId, out _)
+        && Guid.TryParse(envelope.Payload.TechnicianId, out _)
+        && !string.IsNullOrWhiteSpace(envelope.Payload.TechnicianReference)
+        && envelope.Payload.AssignedAt != default
+        && envelope.Payload.AssignedAt.Kind == DateTimeKind.Utc
+        && string.Equals(messageKey, envelope.Payload.JobId, StringComparison.Ordinal);
 }

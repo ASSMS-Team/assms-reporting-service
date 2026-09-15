@@ -5,6 +5,9 @@ public sealed class JobAssignedPayload
 {
     public const string Topic = "job-assigned";
     public const string ConsumerGroup = "assms-reporting-job-assigned";
+    public const string EventType = "JobAssigned";
+    public const int EventVersion = 1;
+    public const string Producer = "dispatch-service";
 
     public string AssignmentId { get; set; } = string.Empty;
     public string JobId { get; set; } = string.Empty;
