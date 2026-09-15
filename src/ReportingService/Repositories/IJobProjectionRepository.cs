@@ -25,5 +25,5 @@ public interface IJobProjectionRepository
     // not come back at all, because the grouping is over the rows that exist.
     Task<IReadOnlyList<JobStatusCount>> GetStatusCountsAsync(DateTime? from, DateTime? to);
 
-    Task<IReadOnlyList<TechnicianJobCount>> GetTechnicianJobCountsAsync(DateTime? from, DateTime? to);
+    Task<IReadOnlyList<TechnicianJobCount>> GetTechnicianJobCountsAsync(DateTime? from, DateTime? to, string? region);
 }

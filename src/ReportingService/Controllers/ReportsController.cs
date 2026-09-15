@@ -97,18 +97,41 @@ public class ReportsController : ControllerBase
         });
     }
 
-    /// <summary>Groups projected jobs by their assigned technician.</summary>
+    private static readonly HashSet<string> SupportedRegions = new(StringComparer.Ordinal)
+    {
+        "WESTERN", "CENTRAL", "SOUTHERN", "NORTHERN", "EASTERN",
+        "NORTH_WESTERN", "NORTH_CENTRAL", "UVA", "SABARAGAMUWA"
+    };
+
+    /// <summary>
+    /// Groups locally projected assignments by technician. from is inclusive,
+    /// to is exclusive, and all supplied filters use AND semantics.
+    /// </summary>
     [HttpGet("jobs-by-technician")]
     [ProducesResponseType(typeof(JobsByTechnicianResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ValidationProblemDetails), StatusCodes.Status400BadRequest)]
-    public async Task<IActionResult> GetJobsByTechnician([FromQuery] string? from, [FromQuery] string? to)
+    public async Task<IActionResult> GetJobsByTechnician(
+        [FromQuery] string? from,
+        [FromQuery] string? to,
+        [FromQuery] string? region)
     {
-        if (!TryParseBound(from, out var fromUtc) || !TryParseBound(to, out var toUtc))
-            return BadRequest(new ValidationProblemDetails(new Dictionary<string, string[]> { ["date"] = new[] { InvalidDateMessage } }) { Status = 400 });
-        if (fromUtc.HasValue && toUtc.HasValue && fromUtc > toUtc)
-            return BadRequest(new ValidationProblemDetails(new Dictionary<string, string[]> { ["from"] = new[] { "from must not be after to." } }) { Status = 400 });
+        var errors = new Dictionary<string, string[]>();
+        if (!TryParseUtcTimestamp(from, out var fromUtc))
+            errors["from"] = new[] { "from must be an RFC 3339 UTC timestamp, for example 2026-09-15T10:30:00Z." };
+        if (!TryParseUtcTimestamp(to, out var toUtc))
+            errors["to"] = new[] { "to must be an RFC 3339 UTC timestamp, for example 2026-09-15T10:30:00Z." };
 
-        var counts = await _repository.GetTechnicianJobCountsAsync(fromUtc, toUtc);
+        var normalizedRegion = string.IsNullOrWhiteSpace(region) ? null : region.Trim().ToUpperInvariant();
+        if (normalizedRegion is not null && !SupportedRegions.Contains(normalizedRegion))
+            errors["region"] = new[] { "region must be a supported normalized region value." };
+
+        if (errors.Count == 0 && fromUtc.HasValue && toUtc.HasValue && fromUtc >= toUtc)
+            errors["from"] = new[] { "from must be earlier than to." };
+
+        if (errors.Count > 0)
+            return BadRequest(new ValidationProblemDetails(errors) { Status = StatusCodes.Status400BadRequest });
+
+        var counts = await _repository.GetTechnicianJobCountsAsync(fromUtc, toUtc, normalizedRegion);
         return Ok(new JobsByTechnicianResponse
         {
             Technicians = counts.Select(count => new TechnicianJobCountResponse
@@ -121,6 +144,23 @@ public class ReportsController : ControllerBase
         });
     }
 
+    private static bool TryParseUtcTimestamp(string? value, out DateTime? parsed)
+    {
+        parsed = null;
+        if (string.IsNullOrWhiteSpace(value)) return true;
+
+        // RFC 3339 includes a date-time separator and offset. DateTimeOffset
+        // preserves the submitted offset before it is normalized for SQL.
+        if (!value.Contains('T') || !DateTimeOffset.TryParse(
+                value,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.AllowWhiteSpaces,
+                out var timestamp))
+            return false;
+
+        parsed = timestamp.UtcDateTime;
+        return true;
+    }
     // Absent and blank are the same thing: ?from= is a caller who cleared the
     // field, not a caller who sent a broken date.
     //

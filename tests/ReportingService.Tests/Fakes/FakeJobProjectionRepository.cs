@@ -118,14 +118,16 @@ public class FakeJobProjectionRepository : IJobProjectionRepository
     public int GetTechnicianJobCountsAsyncCallCount;
     public DateTime? TechnicianQueriedFrom;
     public DateTime? TechnicianQueriedTo;
+    public string? TechnicianQueriedRegion;
 
-    public Task<IReadOnlyList<TechnicianJobCount>> GetTechnicianJobCountsAsync(DateTime? from, DateTime? to)
+    public Task<IReadOnlyList<TechnicianJobCount>> GetTechnicianJobCountsAsync(DateTime? from, DateTime? to, string? region)
     {
         // Both bounds are recorded even when null: "the report was run with no
         // lower bound" is a distinct outcome from "the report was not run", and
         // the call count is what tells them apart.
         TechnicianQueriedFrom = from;
         TechnicianQueriedTo = to;
+        TechnicianQueriedRegion = region;
         GetTechnicianJobCountsAsyncCallCount++;
 
         return Task.FromResult(TechnicianCountsToReturn);
