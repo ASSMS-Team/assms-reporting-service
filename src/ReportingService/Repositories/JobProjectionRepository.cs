@@ -141,7 +141,7 @@ public class JobProjectionRepository : IJobProjectionRepository
         return counts;
     }
 
-    public async Task<IReadOnlyList<TechnicianJobCount>> GetTechnicianJobCountsAsync(DateTime? from, DateTime? to)
+    public async Task<IReadOnlyList<TechnicianJobCount>> GetTechnicianJobCountsAsync(DateTime? from, DateTime? to, string? region)
     {
         await using var connection = _connectionFactory.CreateConnection();
         await connection.OpenAsync();
@@ -150,13 +150,21 @@ public class JobProjectionRepository : IJobProjectionRepository
         var conditions = new List<string>();
         if (from.HasValue)
         {
-            conditions.Add("j.job_created_at >= @from");
+            // A lower bound includes an assignment at exactly that instant.
+            conditions.Add("a.assigned_at >= @from");
             command.Parameters.AddWithValue("@from", from.Value);
         }
         if (to.HasValue)
         {
-            conditions.Add("j.job_created_at <= @to");
+            // An upper bound excludes its instant. Adjacent report windows
+            // therefore do not count the same assignment twice.
+            conditions.Add("a.assigned_at < @to");
             command.Parameters.AddWithValue("@to", to.Value);
+        }
+        if (region is not null)
+        {
+            conditions.Add("j.region = @region");
+            command.Parameters.AddWithValue("@region", region);
         }
 
         command.CommandText = @"
