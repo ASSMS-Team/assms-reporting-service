@@ -3,6 +3,7 @@ using System.Net;
 
 using ReportingService.Messaging.Consumers;
 using ReportingService.Repositories;
+using ReportingService.Services;
 using Microsoft.AspNetCore.HttpOverrides;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -45,6 +46,7 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 
 builder.Services.AddSingleton<IDbConnectionFactory>(new MySqlConnectionFactory(connectionString));
 builder.Services.AddScoped<IJobProjectionRepository, JobProjectionRepository>();
+builder.Services.AddScoped<ReportingMigrationRunner>();
 
 // A hosted service is a singleton, which is why it takes the scope factory and
 // not the repository - see the note in JobCreatedConsumer.
@@ -53,6 +55,11 @@ builder.Services.AddHostedService(serviceProvider =>
         kafkaBootstrapServers,
         serviceProvider.GetRequiredService<IServiceScopeFactory>(),
         serviceProvider.GetRequiredService<ILogger<JobCreatedConsumer>>()));
+builder.Services.AddHostedService(serviceProvider =>
+    new JobAssignedConsumer(
+        kafkaBootstrapServers,
+        serviceProvider.GetRequiredService<IServiceScopeFactory>(),
+        serviceProvider.GetRequiredService<ILogger<JobAssignedConsumer>>()));
 
 builder.Services.AddControllers();
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
@@ -66,6 +73,13 @@ builder.Services.AddSwaggerGen(options =>
 });
 
 var app = builder.Build();
+
+if (args.Contains("--apply-migrations", StringComparer.Ordinal))
+{
+    using var migrationScope = app.Services.CreateScope();
+    await migrationScope.ServiceProvider.GetRequiredService<ReportingMigrationRunner>().ApplyAsync();
+    return;
+}
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())

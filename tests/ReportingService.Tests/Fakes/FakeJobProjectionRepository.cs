@@ -13,6 +13,7 @@ public class FakeJobProjectionRepository : IJobProjectionRepository
     // have reached the table.
     public readonly List<JobProjection> Upserted = new();
     public int UpsertAsyncCallCount;
+    public readonly List<JobAssignmentProjection> Assignments = new();
 
     // Left null for the happy path. Set it to stand in for the database being
     // unreachable, which is the failure the consumer must retry rather than
@@ -68,5 +69,67 @@ public class FakeJobProjectionRepository : IJobProjectionRepository
         GetStatusCountsAsyncCallCount++;
 
         return Task.FromResult(CountsToReturn);
+    }
+
+    // ApplyAssignmentAsync - what the JobAssigned consumer calls.
+    public int ApplyAssignmentAsyncCallCount;
+
+    // Left null for the happy path. Set it to stand in for the database being
+    // unreachable, which is the failure the consumer must retry rather than
+    // commit past.
+    public Exception? ApplyAssignmentExceptionToThrow;
+
+    // How many opening calls throw before one is allowed to succeed. Zero, the
+    // default, never fails. Anything higher stands in for a database that was
+    // down and came back, which is the case the seek-and-retry exists for.
+    public int ApplyAssignmentFailuresBeforeSuccess;
+
+    // Runs after the call is recorded and before the throw. The consumer tests
+    // use it to cancel the host token at the moment of failure, so the loop
+    // unwinds instead of sleeping out its retry delay.
+    public Action? OnApplyAssignment;
+
+    public Task ApplyAssignmentAsync(JobAssignmentProjection assignment)
+    {
+        // Recorded and counted before the throw, so a test that configures a
+        // failure can still assert on what the write was given.
+        Assignments.Add(assignment);
+        ApplyAssignmentAsyncCallCount++;
+
+        OnApplyAssignment?.Invoke();
+
+        if (ApplyAssignmentAsyncCallCount <= ApplyAssignmentFailuresBeforeSuccess)
+        {
+            throw ApplyAssignmentExceptionToThrow
+                ?? new InvalidOperationException("The database was unreachable.");
+        }
+
+        if (ApplyAssignmentExceptionToThrow is not null)
+        {
+            throw ApplyAssignmentExceptionToThrow;
+        }
+
+        return Task.CompletedTask;
+    }
+
+    // GetTechnicianJobCountsAsync - defaults to empty, which is the "no data"
+    // case the report has to answer with a 200 rather than a 404.
+    public IReadOnlyList<TechnicianJobCount> TechnicianCountsToReturn = Array.Empty<TechnicianJobCount>();
+    public int GetTechnicianJobCountsAsyncCallCount;
+    public DateTime? TechnicianQueriedFrom;
+    public DateTime? TechnicianQueriedTo;
+    public string? TechnicianQueriedRegion;
+
+    public Task<IReadOnlyList<TechnicianJobCount>> GetTechnicianJobCountsAsync(DateTime? from, DateTime? to, string? region)
+    {
+        // Both bounds are recorded even when null: "the report was run with no
+        // lower bound" is a distinct outcome from "the report was not run", and
+        // the call count is what tells them apart.
+        TechnicianQueriedFrom = from;
+        TechnicianQueriedTo = to;
+        TechnicianQueriedRegion = region;
+        GetTechnicianJobCountsAsyncCallCount++;
+
+        return Task.FromResult(TechnicianCountsToReturn);
     }
 }

@@ -11,6 +11,10 @@ public interface IJobProjectionRepository
     // delivery.
     Task UpsertAsync(JobProjection projection);
 
+    // Applies a Dispatch-owned assignment fact to an existing job projection.
+    // Updating by job id keeps a redelivered JobAssigned event idempotent.
+    Task ApplyAssignmentAsync(JobAssignmentProjection assignment);
+
     // The jobs-by-status report. Both bounds are optional and independent:
     // supplying neither counts every projected job, supplying both counts the
     // jobs created between them inclusive, and supplying one bounds that end
@@ -20,4 +24,6 @@ public interface IJobProjectionRepository
     // A status with no jobs in range does not come back as a zero row; it does
     // not come back at all, because the grouping is over the rows that exist.
     Task<IReadOnlyList<JobStatusCount>> GetStatusCountsAsync(DateTime? from, DateTime? to);
+
+    Task<IReadOnlyList<TechnicianJobCount>> GetTechnicianJobCountsAsync(DateTime? from, DateTime? to, string? region);
 }
