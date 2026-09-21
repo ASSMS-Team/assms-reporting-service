@@ -1,9 +1,11 @@
 using System.Globalization;
 
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 using ReportingService.DTOs;
 using ReportingService.Repositories;
+using ReportingService.Security;
 
 namespace ReportingService.Controllers;
 
@@ -108,6 +110,7 @@ public class ReportsController : ControllerBase
     /// to is exclusive, and all supplied filters use AND semantics.
     /// </summary>
     [HttpGet("jobs-by-technician")]
+    [Authorize(Roles = StaffRoles.ReportViewers)]
     [ProducesResponseType(typeof(JobsByTechnicianResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ValidationProblemDetails), StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> GetJobsByTechnician(

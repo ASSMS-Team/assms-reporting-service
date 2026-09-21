@@ -3,6 +3,7 @@
 ## Endpoint
 
 `GET /api/reports/jobs-by-technician` returns `technicians` and `total` from Reporting Service's local `reportingdb` read model.
+It requires a valid staff JWT with the `Manager` role.
 
 Optional query parameters:
 
@@ -21,3 +22,16 @@ The SQL applies `a.assigned_at >= @from` and `a.assigned_at < @to`, which lets a
 ## Manager UI
 
 `/reports/jobs-by-technician` is Manager-only. It provides RFC 3339 UTC range fields, a normalized-region selector, dynamic grouped counts, and separate no-data and invalid-filter states.
+
+## Staging configuration
+
+Before deploying this authorization change, add the shared staff-token
+configuration to `/etc/assms/reporting.env` on the Reporting VM. The signing
+key must be the same secret already used by the Customer & Asset Service; keep
+that value out of source control and GitHub variables.
+
+```env
+Authentication__Jwt__Issuer=assms-customer-asset-service
+Authentication__Jwt__Audience=assms-internal
+Authentication__Jwt__SigningKey=<shared Customer Service staging signing key>
+```
