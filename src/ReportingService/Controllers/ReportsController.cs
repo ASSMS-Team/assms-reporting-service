@@ -147,6 +147,52 @@ public class ReportsController : ControllerBase
         });
     }
 
+    /// <summary>
+    /// Returns completed jobs within a date range and/or region.
+    /// from is inclusive, to is exclusive, and all supplied filters use AND semantics.
+    /// </summary>
+    [HttpGet("job-completions")]
+    [Authorize(Roles = StaffRoles.ReportViewers)]
+    [ProducesResponseType(typeof(JobCompletionReportResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ValidationProblemDetails), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> GetJobCompletions(
+        [FromQuery] string? from,
+        [FromQuery] string? to,
+        [FromQuery] string? region)
+    {
+        var errors = new Dictionary<string, string[]>();
+        if (!TryParseUtcTimestamp(from, out var fromUtc))
+            errors["from"] = new[] { "from must be an RFC 3339 UTC timestamp, for example 2026-09-15T10:30:00Z." };
+        if (!TryParseUtcTimestamp(to, out var toUtc))
+            errors["to"] = new[] { "to must be an RFC 3339 UTC timestamp, for example 2026-09-15T10:30:00Z." };
+
+        var normalizedRegion = string.IsNullOrWhiteSpace(region) ? null : region.Trim().ToUpperInvariant();
+        if (normalizedRegion is not null && !SupportedRegions.Contains(normalizedRegion))
+            errors["region"] = new[] { "region must be a supported normalized region value." };
+
+        if (errors.Count == 0 && fromUtc.HasValue && toUtc.HasValue && fromUtc >= toUtc)
+            errors["from"] = new[] { "from must be earlier than to." };
+
+        if (errors.Count > 0)
+            return BadRequest(new ValidationProblemDetails(errors) { Status = StatusCodes.Status400BadRequest });
+
+        var records = await _repository.GetJobCompletionsAsync(fromUtc, toUtc, normalizedRegion);
+        return Ok(new JobCompletionReportResponse
+        {
+            Jobs = records.Select(r => new CompletedJobItemResponse
+            {
+                JobId = r.JobId,
+                JobReference = r.JobReference,
+                Region = r.Region,
+                ServiceCategory = r.ServiceCategory,
+                TechnicianId = r.TechnicianId,
+                TechnicianReference = r.TechnicianReference,
+                CompletedAt = r.CompletedAt,
+            }).ToList(),
+            Total = records.Count,
+        });
+    }
+
     private static bool TryParseUtcTimestamp(string? value, out DateTime? parsed)
     {
         parsed = null;

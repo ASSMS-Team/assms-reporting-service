@@ -95,6 +95,11 @@ builder.Services.AddHostedService(serviceProvider =>
         kafkaBootstrapServers,
         serviceProvider.GetRequiredService<IServiceScopeFactory>(),
         serviceProvider.GetRequiredService<ILogger<JobAssignedConsumer>>()));
+builder.Services.AddHostedService(serviceProvider =>
+    new JobStatusChangedConsumer(
+        kafkaBootstrapServers,
+        serviceProvider.GetRequiredService<IServiceScopeFactory>(),
+        serviceProvider.GetRequiredService<ILogger<JobStatusChangedConsumer>>()));
 
 builder.Services.AddControllers();
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
