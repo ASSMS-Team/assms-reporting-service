@@ -189,4 +189,91 @@ public class JobProjectionRepository : IJobProjectionRepository
 
         return counts;
     }
+
+    public async Task ApplyJobStatusChangedAsync(JobStatusChangeProjection change)
+    {
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync();
+
+        await using var statusCommand = connection.CreateCommand();
+        statusCommand.CommandText = @"
+            UPDATE job_projection
+            SET status = @newStatus
+            WHERE job_id = @jobId;";
+        statusCommand.Parameters.AddWithValue("@jobId", change.JobId);
+        statusCommand.Parameters.AddWithValue("@newStatus", change.NewStatus);
+        await statusCommand.ExecuteNonQueryAsync();
+
+        if (string.Equals(change.NewStatus, "COMPLETED", StringComparison.OrdinalIgnoreCase))
+        {
+            await using var completionCommand = connection.CreateCommand();
+            completionCommand.CommandText = @"
+                INSERT INTO job_completion_projection
+                    (job_id, job_reference, technician_id, technician_reference, completed_at)
+                VALUES
+                    (@jobId, @jobReference, @technicianId, @technicianReference, @completedAt)
+                AS incoming
+                ON DUPLICATE KEY UPDATE
+                    job_reference = incoming.job_reference,
+                    technician_id = incoming.technician_id,
+                    technician_reference = incoming.technician_reference,
+                    completed_at = incoming.completed_at;";
+            completionCommand.Parameters.AddWithValue("@jobId", change.JobId);
+            completionCommand.Parameters.AddWithValue("@jobReference", change.JobReference);
+            completionCommand.Parameters.AddWithValue("@technicianId", (object?)change.TechnicianId ?? DBNull.Value);
+            completionCommand.Parameters.AddWithValue("@technicianReference", (object?)change.TechnicianReference ?? DBNull.Value);
+            completionCommand.Parameters.AddWithValue("@completedAt", change.OccurredAt.ToUniversalTime());
+
+            await completionCommand.ExecuteNonQueryAsync();
+        }
+    }
+
+    public async Task<IReadOnlyList<JobCompletionRecord>> GetJobCompletionsAsync(DateTime? from, DateTime? to, string? region)
+    {
+        await using var connection = _connectionFactory.CreateConnection();
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+
+        var conditions = new List<string>();
+        if (from.HasValue)
+        {
+            conditions.Add("c.completed_at >= @from");
+            command.Parameters.AddWithValue("@from", from.Value);
+        }
+        if (to.HasValue)
+        {
+            conditions.Add("c.completed_at < @to");
+            command.Parameters.AddWithValue("@to", to.Value);
+        }
+        if (region is not null)
+        {
+            conditions.Add("j.region = @region");
+            command.Parameters.AddWithValue("@region", region);
+        }
+
+        command.CommandText = @"
+            SELECT c.job_id, c.job_reference, COALESCE(j.region, '') AS region, j.service_category, c.technician_id, c.technician_reference, c.completed_at
+            FROM job_completion_projection c
+            LEFT JOIN job_projection j ON j.job_id = c.job_id" +
+            (conditions.Count == 0 ? string.Empty : "\n            WHERE " + string.Join(" AND ", conditions)) + @"
+            ORDER BY c.completed_at DESC, c.job_reference ASC;";
+
+        var records = new List<JobCompletionRecord>();
+        await using var reader = (MySqlDataReader)await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            records.Add(new JobCompletionRecord
+            {
+                JobId = reader.GetString(0),
+                JobReference = reader.GetString(1),
+                Region = reader.GetString(2),
+                ServiceCategory = reader.IsDBNull(3) ? null : reader.GetString(3),
+                TechnicianId = reader.IsDBNull(4) ? null : reader.GetString(4),
+                TechnicianReference = reader.IsDBNull(5) ? null : reader.GetString(5),
+                CompletedAt = reader.GetDateTime(6),
+            });
+        }
+
+        return records;
+    }
 }

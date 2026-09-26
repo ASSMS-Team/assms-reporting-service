@@ -132,4 +132,49 @@ public class FakeJobProjectionRepository : IJobProjectionRepository
 
         return Task.FromResult(TechnicianCountsToReturn);
     }
+
+    // ApplyJobStatusChangedAsync - what the JobStatusChanged consumer calls.
+    public readonly List<JobStatusChangeProjection> StatusChanges = new();
+    public int ApplyJobStatusChangedAsyncCallCount;
+    public Exception? ApplyJobStatusChangedExceptionToThrow;
+    public int ApplyJobStatusChangedFailuresBeforeSuccess;
+    public Action? OnApplyJobStatusChanged;
+
+    public Task ApplyJobStatusChangedAsync(JobStatusChangeProjection change)
+    {
+        StatusChanges.Add(change);
+        ApplyJobStatusChangedAsyncCallCount++;
+
+        OnApplyJobStatusChanged?.Invoke();
+
+        if (ApplyJobStatusChangedAsyncCallCount <= ApplyJobStatusChangedFailuresBeforeSuccess)
+        {
+            throw ApplyJobStatusChangedExceptionToThrow
+                ?? new InvalidOperationException("The database was unreachable.");
+        }
+
+        if (ApplyJobStatusChangedExceptionToThrow is not null)
+        {
+            throw ApplyJobStatusChangedExceptionToThrow;
+        }
+
+        return Task.CompletedTask;
+    }
+
+    // GetJobCompletionsAsync - defaults to empty.
+    public IReadOnlyList<JobCompletionRecord> JobCompletionsToReturn = Array.Empty<JobCompletionRecord>();
+    public int GetJobCompletionsAsyncCallCount;
+    public DateTime? CompletionQueriedFrom;
+    public DateTime? CompletionQueriedTo;
+    public string? CompletionQueriedRegion;
+
+    public Task<IReadOnlyList<JobCompletionRecord>> GetJobCompletionsAsync(DateTime? from, DateTime? to, string? region)
+    {
+        CompletionQueriedFrom = from;
+        CompletionQueriedTo = to;
+        CompletionQueriedRegion = region;
+        GetJobCompletionsAsyncCallCount++;
+
+        return Task.FromResult(JobCompletionsToReturn);
+    }
 }
