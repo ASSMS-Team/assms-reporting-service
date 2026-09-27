@@ -5,16 +5,15 @@ using Confluent.Kafka;
 using ReportingService.Messaging.Contracts;
 using ReportingService.Models;
 using ReportingService.Repositories;
+using Prometheus;
 
 namespace ReportingService.Messaging.Consumers;
 
-// Reads job-created and keeps the job_projection read model up to date.
-//
-// A BackgroundService rather than anything triggered by a request: the events
-// arrive whether or not anyone is looking at the report, and the projection has
-// to already be current when the first request comes in, not be built during it.
 public class JobCreatedConsumer : BackgroundService
 {
+    private static readonly Counter EventsConsumedCounter = Metrics.CreateCounter(
+        "assms_kafka_events_consumed_total", "Total Kafka events processed by consumer",
+        new CounterConfiguration { LabelNames = new[] { "topic", "consumer_group", "status" } });
     // How long to wait before re-reading a message whose write failed. Without
     // it a database that is down turns the retry into a hot loop that reopens a
     // connection thousands of times a second and fills the log with one line.
@@ -180,16 +179,13 @@ public class JobCreatedConsumer : BackgroundService
                     // this message again.
                     consumer.Seek(result.TopicPartitionOffset);
 
+                    EventsConsumedCounter.WithLabels("job-created", "assms-reporting-job-created", "failed").Inc();
                     await Task.Delay(WriteRetryDelay, stoppingToken);
                     continue;
                 }
 
-                // Commit last. The row is written and the upsert is idempotent,
-                // so if the process dies between here and the commit the event
-                // is redelivered and overwrites the row it already wrote - which
-                // changes nothing. That is the whole reason the write is allowed
-                // to go first.
                 consumer.Commit(result);
+                EventsConsumedCounter.WithLabels("job-created", "assms-reporting-job-created", "success").Inc();
             }
         }
         catch (OperationCanceledException)
