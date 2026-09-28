@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Confluent.Kafka;
+using Prometheus;
 using ReportingService.Messaging.Contracts;
 using ReportingService.Models;
 using ReportingService.Repositories;
@@ -9,6 +10,11 @@ namespace ReportingService.Messaging.Consumers;
 /// <summary>Projects JobService JobStatusChanged events for Job Completion reports and status projections.</summary>
 public sealed class JobStatusChangedConsumer : BackgroundService
 {
+    private static readonly Counter EventsConsumedCounter = Metrics.CreateCounter(
+        "assms_kafka_events_consumed_total",
+        "Total Kafka events processed by consumer",
+        new CounterConfiguration { LabelNames = new[] { "topic", "consumer_group", "status" } });
+
     private static readonly TimeSpan RetryDelay = TimeSpan.FromSeconds(5);
     private static readonly JsonSerializerOptions SerializerOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
     private readonly ConsumerConfig _config;
@@ -62,6 +68,7 @@ public sealed class JobStatusChangedConsumer : BackgroundService
                 try { envelope = Deserialize(message.Message.Value); }
                 catch (JsonException ex)
                 {
+                    EventsConsumedCounter.WithLabels(JobStatusChangedPayload.Topic, JobStatusChangedPayload.ConsumerGroup, "discarded_malformed").Inc();
                     _logger.LogError(ex, "Discarding malformed JobStatusChanged event at {Offset}.", message.TopicPartitionOffset);
                     consumer.Commit(message);
                     continue;
@@ -69,6 +76,7 @@ public sealed class JobStatusChangedConsumer : BackgroundService
 
                 if (!IsUsable(envelope, message.Message.Key))
                 {
+                    EventsConsumedCounter.WithLabels(JobStatusChangedPayload.Topic, JobStatusChangedPayload.ConsumerGroup, "discarded_invalid").Inc();
                     _logger.LogError("Discarding invalid JobStatusChanged event at {Offset}.", message.TopicPartitionOffset);
                     consumer.Commit(message);
                     continue;
@@ -90,10 +98,12 @@ public sealed class JobStatusChangedConsumer : BackgroundService
                         NewStatus = payload.NewStatus,
                         OccurredAt = payload.OccurredAt,
                     });
+                    EventsConsumedCounter.WithLabels(JobStatusChangedPayload.Topic, JobStatusChangedPayload.ConsumerGroup, "success").Inc();
                     consumer.Commit(message);
                 }
                 catch (Exception ex)
                 {
+                    EventsConsumedCounter.WithLabels(JobStatusChangedPayload.Topic, JobStatusChangedPayload.ConsumerGroup, "failed").Inc();
                     _logger.LogError(ex, "Projecting JobStatusChanged at {Offset} failed. It will be retried.", message.TopicPartitionOffset);
                     consumer.Seek(message.TopicPartitionOffset);
                     await Task.Delay(RetryDelay, stoppingToken);
