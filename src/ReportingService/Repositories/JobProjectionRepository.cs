@@ -40,7 +40,9 @@ public class JobProjectionRepository : IJobProjectionRepository
             AS incoming
             ON DUPLICATE KEY UPDATE
                 job_reference    = incoming.job_reference,
-                status           = incoming.status,
+                -- A redelivered JobCreated must not move an advanced job back to CREATED.
+                status           = IF(" + StatusRank("incoming.status") + @" > " + StatusRank("job_projection.status") + @",
+                                      incoming.status, job_projection.status),
                 region           = incoming.region,
                 priority         = incoming.priority,
                 service_category = incoming.service_category,
@@ -79,6 +81,17 @@ public class JobProjectionRepository : IJobProjectionRepository
         command.Parameters.AddWithValue("@assignedAt", assignment.AssignedAt.ToUniversalTime());
 
         await command.ExecuteNonQueryAsync();
+
+        // The assignment also moves the job to ASSIGNED for jobs-by-status, but
+        // never back from a later status a lifecycle event already applied.
+        await using var statusCommand = connection.CreateCommand();
+        statusCommand.CommandText = @"
+            UPDATE job_projection
+            SET status = 'ASSIGNED'
+            WHERE job_id = @jobId
+              AND " + StatusRank("status") + @" < " + StatusRank("'ASSIGNED'") + @";";
+        statusCommand.Parameters.AddWithValue("@jobId", assignment.JobId);
+        await statusCommand.ExecuteNonQueryAsync();
     }
 
     public async Task<IReadOnlyList<JobStatusCount>> GetStatusCountsAsync(DateTime? from, DateTime? to)
@@ -196,10 +209,13 @@ public class JobProjectionRepository : IJobProjectionRepository
         await connection.OpenAsync();
 
         await using var statusCommand = connection.CreateCommand();
+        // Forward transitions only: a redelivered or out-of-order event (for
+        // example an old ASSIGNED -> IN_PROGRESS after COMPLETED) is ignored.
         statusCommand.CommandText = @"
             UPDATE job_projection
             SET status = @newStatus
-            WHERE job_id = @jobId;";
+            WHERE job_id = @jobId
+              AND " + StatusRank("status") + @" < " + StatusRank("@newStatus") + @";";
         statusCommand.Parameters.AddWithValue("@jobId", change.JobId);
         statusCommand.Parameters.AddWithValue("@newStatus", change.NewStatus);
         await statusCommand.ExecuteNonQueryAsync();
@@ -264,16 +280,29 @@ public class JobProjectionRepository : IJobProjectionRepository
         {
             records.Add(new JobCompletionRecord
             {
-                JobId = reader.GetString(0),
+                // CHAR(36) columns are read back as Guid by MySqlConnector, so
+                // GetString throws; go through the boxed value instead.
+                JobId = Convert.ToString(reader.GetValue(0))!,
                 JobReference = reader.GetString(1),
                 Region = reader.GetString(2),
                 ServiceCategory = reader.IsDBNull(3) ? null : reader.GetString(3),
-                TechnicianId = reader.IsDBNull(4) ? null : reader.GetString(4),
+                TechnicianId = reader.IsDBNull(4) ? null : Convert.ToString(reader.GetValue(4)),
                 TechnicianReference = reader.IsDBNull(5) ? null : reader.GetString(5),
-                CompletedAt = reader.GetDateTime(6),
+                // Stored as UTC; mark it so the API serializes it with a Z.
+                CompletedAt = DateTime.SpecifyKind(reader.GetDateTime(6), DateTimeKind.Utc),
             });
         }
 
         return records;
     }
+
+    // Lifecycle order used to keep the read model moving forward only.
+    // COMPLETED and CANCELLED are terminal; an unknown status ranks lowest.
+    private static string StatusRank(string expression) => $@"(CASE UPPER({expression})
+                WHEN 'CREATED' THEN 0
+                WHEN 'ASSIGNED' THEN 1
+                WHEN 'IN_PROGRESS' THEN 2
+                WHEN 'COMPLETED' THEN 3
+                WHEN 'CANCELLED' THEN 3
+                ELSE -1 END)";
 }
