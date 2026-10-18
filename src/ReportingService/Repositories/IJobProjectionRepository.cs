@@ -26,4 +26,12 @@ public interface IJobProjectionRepository
     Task<IReadOnlyList<JobStatusCount>> GetStatusCountsAsync(DateTime? from, DateTime? to);
 
     Task<IReadOnlyList<TechnicianJobCount>> GetTechnicianJobCountsAsync(DateTime? from, DateTime? to, string? region);
+
+    // Applies a Job-service-owned status change fact. Updates job_projection status,
+    // and if the new status is COMPLETED, idempotently records the job completion projection.
+    Task ApplyJobStatusChangedAsync(JobStatusChangeProjection change);
+
+    // The job completion dynamic report. Retrieves completed jobs optionally filtered
+    // by date range and region.
+    Task<IReadOnlyList<JobCompletionRecord>> GetJobCompletionsAsync(DateTime? from, DateTime? to, string? region);
 }
