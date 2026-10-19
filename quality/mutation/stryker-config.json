@@ -1,0 +1,25 @@
+{
+  "stryker-config": {
+    "solution": "ReportingService.sln",
+    "project": "ReportingService.csproj",
+    "test-projects": [
+      "tests/ReportingService.Tests/ReportingService.Tests.csproj"
+    ],
+    "reporters": [ "html", "json", "progress", "cleartext" ],
+    "coverage-analysis": "perTest",
+    "mutation-level": "Standard",
+    "thresholds": { "high": 80, "low": 60, "break": 0 },
+    "mutate": [
+      "**/*.cs",
+      "!**/Program.cs",
+      "!**/Services/ReportingMigrationRunner.cs",
+      "!**/Repositories/JobProjectionRepository.cs",
+      "!**/Repositories/MySqlConnectionFactory.cs",
+      "!**/Security/AuthorizeOperationFilter.cs",
+      "!**/Controllers/HealthController.cs"
+    ],
+    "ignore-methods": [
+      "*.LogTrace", "*.LogDebug", "*.LogInformation", "*.LogWarning", "*.LogError", "*.LogCritical"
+    ]
+  }
+}
